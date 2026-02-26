@@ -1,0 +1,42 @@
+[Unit]
+Description=Telegram Support + Broadcast Bot (bot_1)
+After=network-online.target postgresql.service
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=4
+
+[Service]
+Type=simple
+User=bot1
+Group=bot1
+
+WorkingDirectory=/opt/bot1/app
+ExecStart=/opt/bot1/venv/bin/python -m main
+Restart=on-failure
+RestartSec=10
+
+EnvironmentFile=/opt/bot1/app/.env
+
+# Security: restrict filesystem (app dir read-only; /opt/bot1 for runtime if needed)
+ReadWritePaths=/opt/bot1
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=true
+LockPersonality=yes
+PrivateMounts=yes
+SystemCallFilter=@system-service
+SystemCallFilter=~@mount @clock @debug @module @raw-io
+CapabilityBoundingSet=
+UMask=0077
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bot1
+
+[Install]
+WantedBy=multi-user.target

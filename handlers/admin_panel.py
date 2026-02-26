@@ -18,6 +18,7 @@ def _is_admin(user_id: int | None) -> bool:
         return True
     return user_id in ADMIN_USER_IDS
 
+
 CALLBACK_BROADCAST = "panel:broadcast"
 CALLBACK_STATS = "panel:stats"
 CALLBACK_SET_WELCOME = "panel:set_welcome"
@@ -38,12 +39,26 @@ def _panel_keyboard() -> InlineKeyboardMarkup:
 
 
 async def cmd_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show admin panel only in admin group; admin-only if ADMIN_USER_IDS is set."""
-    if update.effective_chat.id != ADMIN_GROUP_ID:
+    """Show admin panel only in admin group; admin-only if ADMIN_USER_IDS is set.
+    Works in GROUP and SUPERGROUP. Supports /panel and /panel@bot_username.
+    """
+    effective_chat_id = update.effective_chat.id if update.effective_chat else None
+    effective_user_id = update.effective_user.id if update.effective_user else None
+    logger.info(
+        "[PANEL] cmd_panel triggered: effective_chat.id=%s effective_user.id=%s",
+        effective_chat_id,
+        effective_user_id,
+    )
+
+    if update.effective_chat and update.effective_chat.id != ADMIN_GROUP_ID:
         return
-    if not _is_admin(update.effective_user.id if update.effective_user else None):
+    if not _is_admin(effective_user_id):
+        if ADMIN_USER_IDS:
+            logger.warning(
+                "[PANEL] User not authorized: user_id=%s not in ADMIN_USER_IDS (ADMIN_USER_IDS is set)",
+                effective_user_id,
+            )
         await update.message.reply_text("Access denied. Admin only.")
-        logger.warning("Panel access denied for user %s", update.effective_user.id if update.effective_user else None)
         return
     await update.message.reply_text(
         "Admin Panel",
@@ -57,7 +72,11 @@ async def callback_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     if not _is_admin(update.effective_user.id if update.effective_user else None):
         await update.callback_query.answer("Access denied. Admin only.", show_alert=True)
-        logger.warning("Broadcast callback denied for user %s", update.effective_user.id if update.effective_user else None)
+        if ADMIN_USER_IDS:
+            logger.warning(
+                "[PANEL] Broadcast callback: user_id=%s not in ADMIN_USER_IDS",
+                update.effective_user.id if update.effective_user else None,
+            )
         return
     await update.callback_query.answer()
     await update.callback_query.edit_message_text(
@@ -71,6 +90,11 @@ async def callback_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Show total, active 7d, blocked counts. Admin-only."""
     if not _is_admin(update.effective_user.id if update.effective_user else None):
         await update.callback_query.answer("Access denied. Admin only.", show_alert=True)
+        if ADMIN_USER_IDS:
+            logger.warning(
+                "[PANEL] Stats callback: user_id=%s not in ADMIN_USER_IDS",
+                update.effective_user.id if update.effective_user else None,
+            )
         return
     await update.callback_query.answer()
     stats = await db.get_stats()
@@ -87,6 +111,11 @@ async def callback_set_welcome(update: Update, context: ContextTypes.DEFAULT_TYP
     """Ask admin to send new welcome message. Admin-only."""
     if not _is_admin(update.effective_user.id if update.effective_user else None):
         await update.callback_query.answer("Access denied. Admin only.", show_alert=True)
+        if ADMIN_USER_IDS:
+            logger.warning(
+                "[PANEL] Set Welcome callback: user_id=%s not in ADMIN_USER_IDS",
+                update.effective_user.id if update.effective_user else None,
+            )
         return
     await update.callback_query.answer()
     await update.callback_query.edit_message_text(
@@ -99,6 +128,11 @@ async def callback_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     """Delete all blocked users from DB. Admin-only."""
     if not _is_admin(update.effective_user.id if update.effective_user else None):
         await update.callback_query.answer("Access denied. Admin only.", show_alert=True)
+        if ADMIN_USER_IDS:
+            logger.warning(
+                "[PANEL] Cleanup callback: user_id=%s not in ADMIN_USER_IDS",
+                update.effective_user.id if update.effective_user else None,
+            )
         return
     await update.callback_query.answer()
     deleted = await db.cleanup_blocked_users()
@@ -109,13 +143,33 @@ async def callback_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle message in admin group: either broadcast content or welcome content. Admin-only for these actions."""
-    if not update.message or update.effective_chat.id != ADMIN_GROUP_ID:
+    """Handle message in admin group: either broadcast content or welcome content. Admin-only for these actions.
+    Temporary: log every incoming group message here to confirm bot receives updates.
+    """
+    if not update.message or not update.effective_chat:
         return
+    if update.effective_chat.id != ADMIN_GROUP_ID:
+        return
+
+    # Temporary: log every incoming group message to confirm bot receives updates
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id if update.effective_user else None
+    msg_id = update.message.message_id
+    text = (update.message.text or update.message.caption or "(no text)")[:80]
+    chat_type = getattr(update.effective_chat, "type", None)
+    logger.info(
+        "[GROUP_MSG] chat_id=%s chat_type=%s user_id=%s message_id=%s text=%s",
+        chat_id, chat_type, user_id, msg_id, repr(text),
+    )
 
     if context.user_data.get("awaiting_broadcast"):
         if not _is_admin(update.effective_user.id if update.effective_user else None):
             context.user_data["awaiting_broadcast"] = False
+            if ADMIN_USER_IDS:
+                logger.warning(
+                    "[PANEL] Broadcast message rejected: user_id=%s not in ADMIN_USER_IDS",
+                    update.effective_user.id if update.effective_user else None,
+                )
             await update.message.reply_text("Access denied. Admin only.")
             return
         context.user_data["awaiting_broadcast"] = False
@@ -125,6 +179,11 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if context.user_data.get("awaiting_welcome"):
         if not _is_admin(update.effective_user.id if update.effective_user else None):
             context.user_data["awaiting_welcome"] = False
+            if ADMIN_USER_IDS:
+                logger.warning(
+                    "[PANEL] Welcome message rejected: user_id=%s not in ADMIN_USER_IDS",
+                    update.effective_user.id if update.effective_user else None,
+                )
             await update.message.reply_text("Access denied. Admin only.")
             return
         context.user_data["awaiting_welcome"] = False

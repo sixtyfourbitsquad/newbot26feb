@@ -61,23 +61,41 @@ def main() -> None:
         .build()
     )
 
+    # 1) /start (private)
     application.add_handler(CommandHandler("start", send_welcome))
+
+    # 2) /panel in admin group (GROUPS = GROUP + SUPERGROUP). Registered BEFORE generic
+    #    message handlers so commands are not consumed by handle_admin_message.
+    #    Works with /panel and /panel@bot_username when multiple bots in group.
+    application.add_handler(
+        CommandHandler(
+            "panel",
+            cmd_panel,
+            filters=filters.ChatType.GROUPS & filters.Chat(ADMIN_GROUP_ID),
+        )
+    )
+
+    # 3) Admin group: reply to forwarded message -> send back to user
     application.add_handler(
         MessageHandler(
             filters.Chat(ADMIN_GROUP_ID) & filters.REPLY,
             handle_admin_group_reply,
         )
     )
+
+    # 4) Admin group: generic messages (broadcast/welcome content). Log every
+    #    incoming group message here to confirm bot receives updates.
     application.add_handler(
         MessageHandler(filters.Chat(ADMIN_GROUP_ID), handle_admin_message)
     )
-    application.add_handler(
-        CommandHandler("panel", cmd_panel, filters=filters.Chat(ADMIN_GROUP_ID))
-    )
+
+    # 5) Panel callbacks
     application.add_handler(CallbackQueryHandler(callback_broadcast, pattern="^panel:broadcast$"))
     application.add_handler(CallbackQueryHandler(callback_stats, pattern="^panel:stats$"))
     application.add_handler(CallbackQueryHandler(callback_set_welcome, pattern="^panel:set_welcome$"))
     application.add_handler(CallbackQueryHandler(callback_cleanup, pattern="^panel:cleanup$"))
+
+    # 6) Private messages (exclude commands so /start is not double-handled)
     application.add_handler(
         MessageHandler(
             filters.ChatType.PRIVATE & ~filters.COMMAND,
